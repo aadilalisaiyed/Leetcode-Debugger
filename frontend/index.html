@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dry Run Visualizer</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f172a;
+      --surface:   #1e293b;
+      --surface2:  #0f172a;
+      --border:    #334155;
+      --text:      #e2e8f0;
+      --muted:     #94a3b8;
+      --green:     #22c55e;
+      --blue:      #3b82f6;
+      --red:       #ef4444;
+      --yellow:    #facc15;
+      --highlight: rgba(250, 204, 21, 0.18);
+      --font-mono: 'Courier New', Courier, monospace;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    h2 { font-size: 1.4rem; margin-bottom: 16px; }
+
+    /* ── Editor wrapper ───────────────────────────────────────── */
+    .editor-wrapper {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    #lineNumbers {
+      padding: 10px 8px;
+      background: var(--surface2);
+      color: var(--muted);
+      font: 14px/1.6 var(--font-mono);
+      text-align: right;
+      user-select: none;
+      min-width: 36px;
+      /* line highlight applied via JS on the matching <span> */
+    }
+
+    #lineNumbers span {
+      display: block;
+      padding: 0 4px;
+      border-radius: 3px;
+    }
+
+    #lineNumbers span.active-line {
+      background: var(--yellow);
+      color: #000;
+      font-weight: bold;
+    }
+
+    #code {
+      flex: 1;
+      resize: none;
+      background: var(--surface);
+      color: var(--text);
+      border: none;
+      padding: 10px;
+      font: 14px/1.6 var(--font-mono);
+      outline: none;
+      overflow-y: auto;
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────── */
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+
+    button {
+      padding: 8px 18px;
+      cursor: pointer;
+      border-radius: 6px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-run      { background: var(--green);  color: #000; }
+    .btn-prev     { background: var(--blue);   color: #fff; }
+    .btn-next     { background: var(--blue);   color: #fff; }
+    .btn-full     { background: #7c3aed;       color: #fff; }
+    .btn-clear    { background: var(--surface); color: var(--muted);
+                    border: 1px solid var(--border); }
+
+    /* ── Step info bar ────────────────────────────────────────── */
+    #stepInfo {
+      font-size: 15px;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      margin-bottom: 10px;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #stepInfo.error { border-color: var(--red); color: var(--red); }
+    #stepInfo.ok    { border-color: var(--green); }
+
+    /* ── Variables panel ──────────────────────────────────────── */
+    #variables {
+      background: var(--surface);
+      padding: 14px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font: 14px var(--font-mono);
+      min-height: 60px;
+    }
+
+    .var-row { padding: 3px 0; }
+    .var-row.changed { color: var(--green); font-weight: bold; }
+    .var-key  { color: var(--yellow); }
+    .var-sep  { color: var(--muted); }
+
+    /* Full-run table */
+    .full-step {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 4px;
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+    }
+    .full-step:last-child { border-bottom: none; }
+    .full-step .step-num  { color: var(--muted); min-width: 60px; }
+    .full-step .step-line { color: var(--yellow); min-width: 60px; }
+    .full-step .step-vars { flex: 1; }
+    .full-step.error-row  { color: var(--red); }
+
+    /* Loading spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Muted placeholder text */
+    .placeholder { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+
+<body>
+
+<h2>🚀 Dry Run Visualizer</h2>
+
+<!-- ── Code editor ── -->
+<div class="editor-wrapper">
+  <div id="lineNumbers"></div>
+  <textarea id="code" spellcheck="false">arr = [1, 2, 3]
+for i in range(len(arr)):
+    print(arr[i])
+</textarea>
+</div>
+
+<!-- ── Controls ── -->
+<div class="btn-row">
+  <button class="btn-run"  id="btnRun"  onclick="runCode()">▶ Run</button>
+  <button class="btn-prev" id="btnPrev" onclick="prevStep()" disabled>⬅ Prev</button>
+  <button class="btn-next" id="btnNext" onclick="nextStep()" disabled>Next ➡</button>
+  <button class="btn-full" id="btnFull" onclick="runFull()"  disabled>Run Full ⚡</button>
+  <button class="btn-clear"             onclick="clearAll()">✕ Clear</button>
+</div>
+
+<!-- ── Step info bar ── -->
+<div id="stepInfo"><span class="placeholder">Run your code to start stepping through it.</span></div>
+
+<!-- ── Variables / Full-run panel ── -->
+<div id="variables"><span class="placeholder">Variables will appear here.</span></div>
+
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────
+   State
+───────────────────────────────────────────────────────────────────────── */
+let steps   = [];    // array of step objects from the API
+let current = -1;    // index of the currently displayed step (-1 = none)
+
+const API = "http://127.0.0.1:8000/run";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Line numbers
+───────────────────────────────────────────────────────────────────────── */
+function updateLineNumbers() {
+  const lines = document.getElementById("code").value.split("\n");
+  const container = document.getElementById("lineNumbers");
+
+  container.innerHTML = lines
+    .map((_, i) => `<span id="ln${i + 1}">${i + 1}</span>`)
+    .join("");
+}
+
+document.getElementById("code").addEventListener("input", updateLineNumbers);
+updateLineNumbers();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Highlight active line number (in gutter + scroll textarea)
+───────────────────────────────────────────────────────────────────────── */
+function highlightLine(lineNo) {
+  // Clear any previous highlight
+  document.querySelectorAll("#lineNumbers span.active-line")
+    .forEach(el => el.classList.remove("active-line"));
+
+  if (!lineNo) return;
+
+  const span = document.getElementById(`ln${lineNo}`);
+  if (span) span.classList.add("active-line");
+
+  // Scroll the textarea to the target line
+  const textarea = document.getElementById("code");
+  const lines = textarea.value.split("\n");
+
+  // Calculate character offset of the target line start
+  let offset = 0;
+  for (let i = 0; i < lineNo - 1 && i < lines.length; i++) {
+    offset += lines[i].length + 1; // +1 for \n
+  }
+
+  // Select the line so it is visually obvious
+  const lineEnd = offset + (lines[lineNo - 1]?.length ?? 0);
+  textarea.focus();
+  textarea.setSelectionRange(offset, lineEnd);
+
+  // Approximate scroll position
+  const lineHeight = 22.4; // px — matches 14px font / 1.6 line-height
+  textarea.scrollTop = (lineNo - 3) * lineHeight;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Render a single step
+───────────────────────────────────────────────────────────────────────── */
+function showStep() {
+  const step    = steps[current];
+  const infoEl  = document.getElementById("stepInfo");
+  const varsEl  = document.getElementById("variables");
+
+  // ── Error step ──────────────────────────────────────────────
+  if (step.error) {
+    infoEl.className = "error";
+    infoEl.innerHTML = `❌ Error on line ${step.line ?? "?"}: <em>${escHtml(step.error)}</em>`;
+
+    if (step.line) highlightLine(step.line);
+    varsEl.innerHTML = "";
+    return;
+  }
+
+  // ── Normal step ─────────────────────────────────────────────
+  infoEl.className = "ok";
+  infoEl.innerHTML =
+    `Step <strong>${current + 1}</strong> / ${steps.length} &nbsp;|&nbsp; Line <strong>${step.line}</strong>`;
+
+  highlightLine(step.line);
+
+  const prev    = steps[current - 1]?.variables ?? {};
+  const vars    = step.variables ?? {};
+  const keys    = Object.keys(vars);
+
+  if (keys.length === 0) {
+    varsEl.innerHTML = `<span class="placeholder">No variables yet.</span>`;
+    return;
+  }
+
+  varsEl.innerHTML = keys.map(key => {
+    const changed = JSON.stringify(prev[key]) !== JSON.stringify(vars[key]);
+    return `<div class="var-row ${changed ? "changed" : ""}">
+      <span class="var-key">${escHtml(key)}</span>
+      <span class="var-sep"> = </span>
+      ${escHtml(JSON.stringify(vars[key]))}
+    </div>`;
+  }).join("");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Run (fetch steps from API)
+───────────────────────────────────────────────────────────────────────── */
+async function runCode() {
+  const code = document.getElementById("code").value;
+  if (!code.trim()) return;
+
+  // Loading state
+  const btnRun = document.getElementById("btnRun");
+  btnRun.disabled = true;
+  btnRun.innerHTML = `<span class="spinner"></span> Running…`;
+
+  document.getElementById("stepInfo").className = "";
+  document.getElementById("stepInfo").innerHTML =
+    `<span class="spinner"></span> Executing…`;
+  document.getElementById("variables").innerHTML = "";
+
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail ?? "Server error");
+    }
+
+    const data = await res.json();
+    steps   = data.steps ?? [];
+    current = 0;
+
+    if (steps.length === 0) {
+      document.getElementById("stepInfo").innerHTML =
+        `<span class="placeholder">No steps recorded. Does your code have executable lines?</span>`;
+      setNavButtons(false);
+      return;
+    }
+
+    setNavButtons(true);
+    showStep();
+
+  } catch (err) {
+    document.getElementById("stepInfo").className = "error";
+    document.getElementById("stepInfo").innerText = `❌ ${err.message}`;
+    setNavButtons(false);
+  } finally {
+    btnRun.disabled = false;
+    btnRun.innerHTML = "▶ Run";
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Navigation
+───────────────────────────────────────────────────────────────────────── */
+function nextStep() {
+  if (current < steps.length - 1) {
+    current++;
+    showStep();
+    updateNavState();
+  }
+}
+
+function prevStep() {
+  if (current > 0) {
+    current--;
+    showStep();
+    updateNavState();
+  }
+}
+
+function updateNavState() {
+  document.getElementById("btnPrev").disabled = (current <= 0);
+  document.getElementById("btnNext").disabled = (current >= steps.length - 1);
+}
+
+function setNavButtons(enabled) {
+  document.getElementById("btnPrev").disabled = !enabled || current <= 0;
+  document.getElementById("btnNext").disabled = !enabled || current >= steps.length - 1;
+  document.getElementById("btnFull").disabled = !enabled;
+  updateNavState();
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Run Full — display all steps at once
+───────────────────────────────────────────────────────────────────────── */
+function runFull() {
+  if (!steps.length) return;
+
+  document.getElementById("stepInfo").className = "ok";
+  document.getElementById("stepInfo").innerHTML =
+    `Showing all <strong>${steps.length}</strong> steps`;
+
+  const rows = steps.map((step, idx) => {
+    if (step.error) {
+      return `<div class="full-step error-row">
+        <span class="step-num">Step ${idx + 1}</span>
+        <span class="step-line">Line ${step.line ?? "?"}</span>
+        <span class="step-vars">❌ ${escHtml(step.error)}</span>
+      </div>`;
+    }
+
+    const vars    = step.variables ?? {};
+    const varText = Object.entries(vars)
+      .map(([k, v]) => `<span class="var-key">${escHtml(k)}</span> = ${escHtml(JSON.stringify(v))}`)
+      .join("&nbsp;&nbsp; ");
+
+    return `<div class="full-step">
+      <span class="step-num">Step ${idx + 1}</span>
+      <span class="step-line">Line ${step.line}</span>
+      <span class="step-vars">${varText || '<em class="placeholder">—</em>'}</span>
+    </div>`;
+  }).join("");
+
+  document.getElementById("variables").innerHTML = rows;
+
+  // Remove line highlight — we're showing everything now
+  document.querySelectorAll("#lineNumbers span.active-line")
+    .forEach(el => el.classList.remove("active-line"));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Clear
+───────────────────────────────────────────────────────────────────────── */
+function clearAll() {
+  steps   = [];
+  current = -1;
+
+  document.getElementById("stepInfo").className = "";
+  document.getElementById("stepInfo").innerHTML =
+    `<span class="placeholder">Run your code to start stepping through it.</span>`;
+  document.getElementById("variables").innerHTML =
+    `<span class="placeholder">Variables will appear here.</span>`;
+
+  document.querySelectorAll("#lineNumbers span.active-line")
+    .forEach(el => el.classList.remove("active-line"));
+
+  setNavButtons(false);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Utility
+───────────────────────────────────────────────────────────────────────── */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+</script>
+
+</body>
+</html>
