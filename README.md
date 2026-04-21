@@ -9,7 +9,6 @@
 - [What Is This?](#-what-is-this)
 - [Features](#-features)
 - [Project Structure](#-project-structure)
-- [Architecture Overview](#-architecture-overview)
 - [Logic Flow Diagram](#-logic-flow-diagram)
 - [Installation & Setup](#-installation--setup)
 - [Complete User Flow](#-complete-user-flow)
@@ -67,42 +66,6 @@ All three files live in the **same directory**. There are no sub-packages, no co
 
 ---
 
-## 🏗 Architecture Overview
-
-```mermaid
-graph TD
-    subgraph Browser["🌐 Browser  (index.html)"]
-        A[Code Editor\nTextarea] -->|User types code| B[Run Button]
-        B -->|fetch POST /run| C[Fetch API]
-        C -->|JSON response| D[Steps Array\nin JS memory]
-        D --> E[Step Navigator\nPrev / Next]
-        D --> F[Run Full View]
-        E --> G[showStep]
-        F --> H[runFull]
-        G --> I[Line Gutter\nHighlight]
-        G --> J[Variable Panel\nwith diff highlight]
-        H --> K[Full Step\nTable]
-    end
-
-    subgraph Server["⚙️  FastAPI Server  (main.py + tracer.py)"]
-        L[POST /run\nendpoint] -->|validates request| M[run_code\ntracer.py]
-        M -->|sys.settrace| N[_trace callback]
-        N -->|line event| O[Snapshot\nframe.f_locals]
-        O -->|filter internals\nsafe_repr values| P[_steps list]
-        P -->|exception caught| Q[Error Step\nwith line number]
-        P --> R[Return steps list]
-        Q --> R
-        R -->|JSON| L
-    end
-
-    C -->|HTTP POST\napplication/json| L
-    L -->|HTTP 200\n{ steps: [...] }| C
-
-    style Browser fill:#1e293b,color:#e2e8f0,stroke:#3b82f6
-    style Server fill:#0f172a,color:#e2e8f0,stroke:#22c55e
-```
-
----
 
 ## 🔄 Logic Flow Diagram
 
